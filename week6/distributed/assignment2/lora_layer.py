@@ -256,11 +256,11 @@ class Linear(nn.Linear, LoraLayer):
             warnings.warn("Already merged. Nothing to do.")
             return
         if self.r[self.active_adapter] > 0:
-            # TODO: Merge the LoRA parameters by adding the product of lora_B weights and lora_A weights (after transposing 
-            # if necessary) to the original weights, scaled by the LoRA scaling factor. After this operation, set the merged
-            # flag to True.
-            self.weight.data += None ### YOUR CODE HERE ###
-            self.merged = None ### YOUR CODE HERE ###
+            lora_A_weight = transpose(self.lora_A[self.active_adapter].weight, self.fan_in_fan_out)
+            lora_B_weight = self.lora_B[self.active_adapter].weight
+            scaling_factor = self.scaling[self.active_adapter]
+            self.weight.data += lora_B_weight @ lora_A_weight * scaling_factor
+            self.merged = True
 
     def unmerge(self):
         # Separate low-rank approximation from original weights
@@ -292,16 +292,15 @@ class Linear(nn.Linear, LoraLayer):
             # Changing data type for ensuring consistency
             x = x.to(self.lora_A[self.active_adapter].weight.dtype)
             
-            # TODO: If the LoRA adapter is active and not merged, add the output of the LoRA layers to the result. This involves
-            # passing the input through lora_A, applying dropout, then passing it through lora_B. The output is scaled by the
-            # LoRA scaling factor and added to the result.
-            result += None ### YOUR CODE HERE ###
+            lora_A_output = self.lora_A[self.active_adapter](x)
+            lora_A_output = F.dropout(lora_A_output, p=self.dropout, training=self.training)
+            lora_B_output = self.lora_B[self.active_adapter](lora_A_output)
+            scaling_factor = self.scaling[self.active_adapter]
+            result += scaling_factor * lora_B_output
         else:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         
-        # Reverting to the previous data type
-        result = result.to(previous_dtype)
-        return result
+        return result.to(previous_dtype)
     
 def transpose(weight, fan_in_fan_out):
     # Helper function to transpose weights if required
